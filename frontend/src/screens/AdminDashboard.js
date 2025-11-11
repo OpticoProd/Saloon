@@ -1517,36 +1517,6 @@ export default function AdminDashboard({ navigation }) {
                     </Button>
                   ) : (
                     <>
-                      {/* View Password */}
-                      <Button
-                        mode="outlined"
-                        onPress={() => {
-                          setPasswordUserId(item._id);
-                          handleViewPassword(item._id);
-                        }}
-                        style={styles.actionButton}
-                        textColor={isDarkMode ? '#FFD700' : colors.accent}
-                        labelStyle={styles.buttonLabel}
-                      >
-                        <ButtonText>View Password</ButtonText>
-                      </Button>
-
-                      {/* History */}
-
-                      {/* Change Password Button ✅ */}
-                      {(loggedInUser?.role === 'superadmin' ||
-                        loggedInUser?.role === 'admin' ||
-                        loggedInUser?._id === item._id) && (
-                        <Button
-                          mode="outlined"
-                          onPress={() => openChangePasswordModal(item._id)}
-                          style={styles.actionButton}
-                          textColor={isDarkMode ? '#FFD700' : colors.accent}
-                        >
-                          <ButtonText>Change Password</ButtonText>
-                        </Button>
-                      )}
-
                       {/* Add Points */}
                       <Button
                         mode="contained"
@@ -1635,6 +1605,33 @@ export default function AdminDashboard({ navigation }) {
                         textColor="#FFFFFF"
                       >
                         <ButtonText>Redeem Points</ButtonText>
+                      </Button>
+
+                      {/* Change Password Button ✅ */}
+                      {(loggedInUser?.role === 'superadmin' ||
+                        loggedInUser?.role === 'admin' ||
+                        loggedInUser?._id === item._id) && (
+                        <Button
+                          mode="outlined"
+                          onPress={() => openChangePasswordModal(item._id)}
+                          style={styles.actionButton}
+                          textColor={isDarkMode ? '#FFD700' : colors.accent}
+                        >
+                          <ButtonText>Change Password</ButtonText>
+                        </Button>
+                      )}
+
+                      <Button
+                        mode="outlined"
+                        onPress={() => {
+                          setPasswordUserId(item._id);
+                          handleViewPassword(item._id);
+                        }}
+                        style={styles.actionButton}
+                        textColor={isDarkMode ? '#FFD700' : colors.accent}
+                        labelStyle={styles.buttonLabel}
+                      >
+                        <ButtonText>View Password</ButtonText>
                       </Button>
                     </>
                   )}
@@ -2290,7 +2287,7 @@ export default function AdminDashboard({ navigation }) {
             <Text style={styles.sectionTitle}>All Rewards</Text>
             {rewards.length > 0 ? (
               <Swiper
-                height={380}
+                height={480}
                 showsPagination
                 loop
                 dotStyle={{ backgroundColor: isDarkMode ? '#555' : '#ccc' }}
@@ -2307,14 +2304,29 @@ export default function AdminDashboard({ navigation }) {
                     <Text
                       style={[styles.cardText, { color: isDarkMode ? '#FFD700' : colors.text }]}
                     >
-                      Package: {reward.name}
+                      Package name: {reward.name}
                     </Text>
                     <Text
-                      style={[styles.cardText, { color: isDarkMode ? '#FFFFFF' : colors.text }]}
+                      style={[
+                        styles.cardText,
+                        {
+                          color: isDarkMode ? '#fff' : colors.text,
+                          fontSize: 14,
+                          fontWeight: '500',
+                          letterSpacing: 0.4,
+                        },
+                      ]}
                     >
-                      GetPoint: {reward.price} | Reedem: {reward.bundalValue} | Payout:{' '}
+                      <Text style={{ fontWeight: '700', color: '#4CAF50' }}>GetPoint:</Text>{' '}
+                      {reward.price}
+                      {'   '}•{'   '}
+                      <Text style={{ fontWeight: '700', color: '#2196F3' }}>Redeem:</Text>{' '}
+                      {reward.bundalValue}
+                      {'   '}•{'   '}
+                      <Text style={{ fontWeight: '700', color: '#FF9800' }}>Payout:</Text>{' '}
                       {reward.pointsRequired}
                     </Text>
+
                     <View style={styles.buttonRow}>
                       <Button
                         mode="outlined"
@@ -2354,7 +2366,7 @@ export default function AdminDashboard({ navigation }) {
             >
               <Card.Content>
                 <TextInput
-                  label="Package"
+                  label="Package Name"
                   value={newReward.name}
                   onChangeText={text => setNewReward({ ...newReward, name: text })}
                   style={styles.input}
@@ -2364,7 +2376,7 @@ export default function AdminDashboard({ navigation }) {
                   mode="outlined"
                 />
                 <TextInput
-                  label="GetPoint"
+                  label="GetPoint ?"
                   value={newReward.price}
                   onChangeText={text => setNewReward({ ...newReward, price: text })}
                   keyboardType="numeric"
@@ -2375,7 +2387,7 @@ export default function AdminDashboard({ navigation }) {
                   mode="outlined"
                 />
                 <TextInput
-                  label="Reedem Point"
+                  label="Reedem Point to be"
                   value={newReward.bundalValue}
                   onChangeText={text => setNewReward({ ...newReward, bundalValue: text })}
                   keyboardType="numeric"
@@ -2386,7 +2398,7 @@ export default function AdminDashboard({ navigation }) {
                   mode="outlined"
                 />
                 <TextInput
-                  label="Payout"
+                  label="₹ Payout "
                   value={newReward.pointsRequired}
                   onChangeText={text => setNewReward({ ...newReward, pointsRequired: text })}
                   keyboardType="numeric"
@@ -3785,12 +3797,7 @@ const styles = StyleSheet.create({
   icon: {
     marginLeft: 8,
   },
-  // swiperInput: {
-  //   backgroundColor: 'transparent',
-  //   borderRadius: 8,
-  //   marginVertical: 5,
-  //   width: '90%',
-  // },
+
   swiperInput: {
     backgroundColor: 'transparent',
     borderRadius: 8,
