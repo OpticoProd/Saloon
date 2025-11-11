@@ -219,11 +219,11 @@ const setupSuperAdmin = async () => {
   try {
     const superAdmin = await User.findOne({ role: 'superadmin' });
     if (!superAdmin) {
-      const plainPassword = 'sar@123';
+      const plainPassword = 'Admin123';
       const hashedPassword = await bcrypt.hash(plainPassword, 10);
       const uniqueCode = 'SUPERADMINDEMO';
       await User.create({
-        name: 'sar',
+        name: 'Salon',
         mobile: '1234567890',
         password: hashedPassword,
         plainPassword,
@@ -232,7 +232,7 @@ const setupSuperAdmin = async () => {
         uniqueCode,
         adminId: null,
       });
-      console.log('Super Admin created', { name: 'sar', mobile: '1234567890', pass: 'sar@123' });
+      console.log('Super Admin created', { name: 'Salon', mobile: '1234567890', pass: 'Admin123' });
     }
   } catch (error) {
     console.error('Error setting up super admin:', error);
