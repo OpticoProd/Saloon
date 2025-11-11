@@ -34,11 +34,6 @@ import TopUsers from '../components/TopUsers';
 import { API_BASE_URL } from '../config/baseURL';
 
 const BASE_URL = API_BASE_URL;
-
-// const BASE_URL = 'http://localhost:5000';
-// const BASE_URL = 'https://barcodedev-v2.onrender.com';
-// const BASE_URL = 'http://192.168.1.39:5000';
-
 const { width } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
 
@@ -1673,19 +1668,26 @@ export default function AdminDashboard({ navigation }) {
     ]
   );
 
+  // ✅ UPDATED: Unused pickImage() – now consistent with base64 (for future use)
   const pickImage = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true, // <— native crop UI
-      aspect: [4, 3], // <— crop aspect
-      quality: 0.8,
-      base64: false,
+      // mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: [ImagePicker.MediaType.Images], // Instead of .MediaTypeOptions.Images
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.7, // ✅ Standardized quality
+      base64: true, // ✅ Enable base64
     });
     if (!res.canceled && res.assets?.[0]?.uri) {
-      setNewReward(prev => ({ ...prev, image: res.assets[0].uri }));
+      // ✅ Construct full data URI
+      const base64Data = res.assets[0].base64;
+      setNewReward(prev => ({
+        ...prev,
+        image: `data:image/jpeg;base64,${base64Data}`,
+      }));
     }
   };
-  // NEW - capture image using camera
+  // ✅ FIXED: captureImage() – now uses base64 like the upload button
   const captureImage = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
@@ -1693,14 +1695,19 @@ export default function AdminDashboard({ navigation }) {
       return;
     }
     const res = await ImagePicker.launchCameraAsync({
-      allowsEditing: true, // <— crop UI after capture
-      // aspect: [4, 3],
+      allowsEditing: true,
       aspect: undefined,
-      quality: 0.8,
-      base64: false,
+      quality: 0.7, // ✅ Match upload quality for consistency
+      base64: true, // ✅ CRITICAL: Enable base64 to avoid file://
     });
     if (!res.canceled && res.assets?.[0]?.uri) {
-      setNewReward(prev => ({ ...prev, image: res.assets[0].uri }));
+      // ✅ Construct full data URI (same as upload)
+      const base64Data = res.assets[0].base64;
+      setNewReward(prev => ({
+        ...prev,
+        image: `data:image/jpeg;base64,${base64Data}`,
+      }));
+      Toast.show({ type: 'success', text1: 'Photo captured!' }); // ✅ Optional: User feedback
     }
   };
 
@@ -1774,8 +1781,6 @@ export default function AdminDashboard({ navigation }) {
                   </Text>
                 </View>
 
-
-
                 <Button
                   mode="contained"
                   onPress={() => setShowPasswordModal(true)} // optional if you want modal, or handleChangePassword directly
@@ -1795,10 +1800,6 @@ export default function AdminDashboard({ navigation }) {
                 </Button>
               </Card.Content>
             </Card>
-
-
-
-
 
             {/* Top 3 users */}
             <Card style={[styles.card, { backgroundColor: isDarkMode ? '#333' : colors.surface }]}>
@@ -2418,7 +2419,8 @@ export default function AdminDashboard({ navigation }) {
                     onPress={async () => {
                       const result = await ImagePicker.launchImageLibraryAsync({
                         base64: true,
-                        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                        // mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                        mediaTypes: [ImagePicker.MediaType.Images], // Instead of .MediaTypeOptions.Images
                         allowsEditing: true,
                         quality: 0.5,
                       });

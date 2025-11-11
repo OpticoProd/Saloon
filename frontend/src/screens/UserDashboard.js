@@ -1,11 +1,15 @@
+import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
+import axios from 'axios';
+import { BarCodeScanner } from 'expo-barcode-scanner';
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   BackHandler,
   FlatList,
-  Image,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -13,60 +17,17 @@ import {
   TouchableOpacity,
   unstable_batchedUpdates,
   View,
-  Modal,
 } from 'react-native';
-import { Button, Card, Text, TextInput, useTheme } from 'react-native-paper';
+import { Badge, Button, Card, Text, TextInput, useTheme } from 'react-native-paper';
 import Swiper from 'react-native-swiper';
-import { MaterialIcons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
-import axios from 'axios';
-import { BarCodeScanner } from 'expo-barcode-scanner';
-import { Badge } from 'react-native-paper';
 import Toast from 'react-native-toast-message';
+import { Image } from 'react-native';
 import { io as ioClient } from 'socket.io-client';
 import { ThemeContext } from '../ThemeContext';
 import { API_BASE_URL } from '../config/baseURL';
-import HistoryComponent from '../components/HistoryComponent';
+
 const BASE_URL = API_BASE_URL;
 
-const getRewardImageSource = image => {
-  if (!image || typeof image !== 'string') return null;
-
-  const trimmed = image.trim();
-  if (!trimmed) return null;
-
-  if (/^data:image\/[a-zA-Z]+;base64,/.test(trimmed)) {
-    return { uri: trimmed };
-  }
-
-  if (/^https?:\/\//i.test(trimmed)) {
-    return { uri: trimmed };
-  }
-
-  const normalizedPath = trimmed.replace(/\\/g, '/');
-  if (/^\/?uploads\//i.test(normalizedPath) || normalizedPath.startsWith('/')) {
-    const normalized = normalizedPath.replace(/^\//, '');
-    return { uri: `${BASE_URL.replace(/\/$/, '')}/${normalized}` };
-  }
-
-  let mime = 'jpeg';
-  if (/^(iVBORw0KGgo|IVBORw0KGgo)/.test(trimmed)) {
-    mime = 'png';
-  } else if (/^(R0lGODdh|R0lGODlh)/.test(trimmed)) {
-    mime = 'gif';
-  } else if (/^PHN2Zy/.test(trimmed)) {
-    mime = 'svg+xml';
-  } else if (/^Qk/.test(trimmed)) {
-    mime = 'bmp';
-  } else if (/^(UklGR|UkZGR)/.test(trimmed)) {
-    mime = 'webp';
-  } else if (/^AAABAA/.test(trimmed)) {
-    mime = 'x-icon';
-  }
-
-  return { uri: `data:image/${mime};base64,${trimmed}` };
-};
 export default function UserDashboard({ navigation }) {
   // State Declarations
   const { colors } = useTheme();
@@ -93,22 +54,18 @@ export default function UserDashboard({ navigation }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [history, setHistory] = useState([]);
   const [addedPoints, setAddedPoints] = useState(0);
-  const [lastAddedPoints, setLastAddedPoints] = useState(0); //added recent
+  const [lastAddedPoints, setLastAddedPoints] = useState(0);
   const flatListRef = React.useRef(null);
-  const socketRef = React.useRef(null); // Store socket instance for cleanup
+  const socketRef = React.useRef(null);
   const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
-
-
-  // NEW - history & scan-animation state
+  const [showPointsAnimation, setShowPointsAnimation] = useState(false);
   const [historyItems, setHistoryItems] = useState([]);
-
   const [unreadUser, setUnreadUser] = useState(0);
   const [netPointsHistory, setNetPointsHistory] = useState([]);
 
   const toggleRewardHistory = useCallback(() => {
-    // Single state update (forceRender hata diya)
     setShowRewardHistory(prev => !prev);
   }, []);
 
@@ -119,35 +76,33 @@ export default function UserDashboard({ navigation }) {
       gestureEnabled: false,
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          {/* Notification Bell */}
-          <TouchableOpacity onPress={() => setCurrentTab('history')} style={{ marginRight: 10 }}>
+          {/* <TouchableOpacity onPress={() => setCurrentTab('history')} style={{ marginRight: 10 }}>
             <MaterialIcons name="notifications" size={24} color={colors.primary} />
             {unreadUser > 0 && (
               <Badge style={{ position: 'absolute', top: -5, right: -5 }}>{unreadUser}</Badge>
             )}
-          </TouchableOpacity>
-
-          {/* Dark Mode Toggle */}
+          </TouchableOpacity> */}
           <Switch
             value={isDarkMode}
-            onValueChange={() => {
-              // console.log("🖱️ Header switch clicked");
-              toggleTheme(); // ✅ correct function from ThemeContext
-            }}
-            style={{ transform: [{ scale: 0.8 }], marginRight: 10 }}
+            onValueChange={toggleTheme}
+            style={{ transform: [{ scale: 0.8 }], marginRight: 12 }}
             thumbColor={isDarkMode ? '#FFD700' : '#f4f3f4'}
             trackColor={{ false: '#767577', true: '#81b0ff' }}
           />
-          {/* Logout Button */}
           <TouchableOpacity onPress={handleLogout}>
-            <MaterialIcons name="logout" size={24} color="#f44336" />
+            <MaterialIcons
+              name="logout"
+              size={24}
+              color="#f44336"
+              style={{  marginRight: 14 }}
+            />
           </TouchableOpacity>
         </View>
       ),
     });
-  }, [unreadUser, navigation, colors, isDarkMode]);
+  }, [unreadUser, navigation, colors, isDarkMode, toggleTheme]);
 
-  // ✅ Initialization (fetch profile + setup socket at top-level)
+  // Initialization
   useEffect(() => {
     const initialize = async () => {
       try {
@@ -155,45 +110,15 @@ export default function UserDashboard({ navigation }) {
         if (storedUser) {
           const parsedUser = JSON.parse(storedUser);
           if (!parsedUser.id) throw new Error('Invalid user ID');
-
           setUser(parsedUser);
           await fetchUserProfile(parsedUser.id);
           await fetchUserBarcodes(parsedUser.id);
           await fetchRewards();
           await fetchNotifications();
           await fetchRedemptions();
-
-          const fetchHistory = async () => {
-            try {
-              const token = await AsyncStorage.getItem('token');
-              const res = await axios.get(`${BASE_URL}/history/user/${user.id}`, {
-                headers: { Authorization: token },
-              });
-              // Sort ascending (oldest first) for correct cumulative computation
-              const sortedHistory = res.data.sort(
-                (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
-              );
-              let cumulative = 0;
-              const withNet = sortedHistory.map(item => {
-                const change = ['scan', 'point_add'].includes(item.action)
-                  ? item.details?.amount || item.details?.points || 0
-                  : -(item.details?.amount || 0);
-                cumulative += change;
-                return { ...item, transactionPoint: change, netPoint: cumulative };
-              });
-              // Reverse for display (newest first, but nets correct)
-              const displayHistory = withNet.reverse();
-              setHistory(displayHistory);
-              setNetPointsHistory(displayHistory);
-            } catch (err) {
-              console.error('Fetch history error:', err);
-            }
-          };
-          if (!user || !user.id) {
-            console.warn('User not loaded yet, skipping fetchHistory');
-            return;
+          if (parsedUser.id) {
+            await fetchUserHistory();
           }
-          await fetchHistory();
         } else {
           throw new Error('No user data found');
         }
@@ -207,63 +132,40 @@ export default function UserDashboard({ navigation }) {
         });
       }
     };
-
     initialize();
   }, [navigation]);
 
-  // ✅ Real-time Socket.IO Setup (moved outside initialize)
+  // Socket Setup (cleaned up duplicates)
   useEffect(() => {
     if (!user?.id) return;
     let socket;
-
     const setupSocket = async () => {
       try {
         const token = await AsyncStorage.getItem('token');
         if (!token) return;
-
-        // Socket.IO client needs HTTP URL, not WebSocket URL
-        // It handles WebSocket connection internally
-        socket = ioClient(BASE_URL, {
-          transports: ['websocket', 'polling'],
+        socket = ioClient(BASE_URL.replace(/^http/, 'ws'), {
+          transports: ['websocket'],
           auth: { token },
           reconnection: true,
           reconnectionAttempts: 5,
           reconnectionDelay: 2000,
         });
-        
-        // Store socket reference for cleanup
         socketRef.current = socket;
-
         socket.on('connect', () => {
-          console.log('✅ Socket connected successfully');
-          // Register only after connection is established
+          console.log('✅ Socket connected');
           socket.emit('register', { role: 'user', userId: user.id.toString() });
         });
-        
-        socket.on('connect_error', err => {
-          console.warn('❌ Socket connection error:', err.message);
-        });
-        socket.on('disconnect', (reason) => {
-          console.log('⚠️ Socket disconnected:', reason);
-        });
-        
-        // Register immediately if already connected, or wait for connect event
-        if (socket.connected) {
-          socket.emit('register', { role: 'user', userId: user.id.toString() });
-        }
-
-        // Events
+        socket.on('connect_error', err => console.warn('❌ Socket error:', err.message));
+        socket.on('disconnect', reason => console.log('⚠️ Socket disconnected:', reason));
+        // Consolidated listeners
         socket.on('user:selfUpdated', data => {
           setUser(prev => ({ ...prev, ...data }));
-          // CHANGE: Added toast and unread count for user feedback
           Toast.show({ type: 'info', text1: 'Your profile updated' });
-          setUnreadUser(prev => prev + 1); // Trigger bell notification
+          setUnreadUser(prev => prev + 1);
         });
-
         socket.on('points:updated', data => {
           if (data?.userId?.toString() === user.id.toString()) {
             setUser(prev => ({ ...prev, points: data.points }));
-            // CHANGE: Added toast and unread count for points update
             Toast.show({
               type: 'success',
               text1: 'Points updated',
@@ -272,149 +174,40 @@ export default function UserDashboard({ navigation }) {
             setUnreadUser(prev => prev + 1);
           }
         });
-
-        // ✅ Listen for real-time range updates
-        socket.on('range:updated', payload => {
-          Toast.show({ type: 'info', text1: 'Barcode Ranges Updated!' });
-          // Note: Range updates don't affect user dashboard directly
-          // If needed, can refresh barcodes here: fetchUserBarcodes(user.id);
+        socket.on('reward:updated', () => {
+          fetchRewards();
+          Toast.show({ type: 'info', text1: 'Rewards Updated!' });
+          setUnreadUser(prev => prev + 1);
         });
-
-        // ✅ Listen for real-time reward updates
-        socket.on('reward:updated', payload => {
-          try {
-            console.log('🎉 Received reward:updated event:', payload);
-            console.log('🔄 Calling fetchRewards to refresh rewards list immediately...');
-            // Fetch immediately without delay
-            if (fetchRewards) {
-              fetchRewards();
-            } else {
-              console.warn('⚠️ fetchRewards function not available yet');
-            }
-            Toast.show({ type: 'info', text1: 'Rewards Updated!' });
-            setUnreadUser(prev => prev + 1);
-          } catch (err) {
-            console.error('❌ Error handling reward:updated event:', err);
-          }
+        socket.on('rewardCreated', () => {
+          fetchRewards();
+          Toast.show({ type: 'success', text1: 'New reward available!' });
+          setUnreadUser(prev => prev + 1);
         });
-
-        // ✅ Also listen for reward created event
-        socket.on('rewardCreated', payload => {
-          try {
-            console.log('🎉 Received rewardCreated event:', payload);
-            console.log('🔄 Refreshing rewards list...');
-            if (fetchRewards) {
-              fetchRewards();
-            } else {
-              console.warn('⚠️ fetchRewards function not available yet');
-            }
-            Toast.show({ type: 'success', text1: 'New reward available!' });
-            setUnreadUser(prev => prev + 1);
-          } catch (err) {
-            console.error('❌ Error handling rewardCreated event:', err);
-          }
+        socket.on('reward:deleted', () => {
+          fetchRewards();
+          Toast.show({ type: 'info', text1: 'Reward removed' });
+          setUnreadUser(prev => prev + 1);
         });
-
-        // ✅ Listen for reward deleted event
-        socket.on('reward:deleted', payload => {
-          try {
-            console.log('🗑️ Received reward:deleted event:', payload);
-            if (fetchRewards) {
-              fetchRewards();
-            } else {
-              console.warn('⚠️ fetchRewards function not available yet');
-            }
-            Toast.show({ type: 'info', text1: 'Reward removed' });
-            setUnreadUser(prev => prev + 1);
-          } catch (err) {
-            console.error('❌ Error handling reward:deleted event:', err);
-          }
+        socket.on('redemption:updated', () => {
+          fetchRedemptions();
+          fetchNotifications();
+          setUnreadUser(prev => prev + 1);
         });
-
-        // ✅ Listen for real-time redemption updates
-        socket.on('redemption:updated', payload => {
-          fetchRedemptions(); // Refetch redemption requests
-          fetchNotifications(); // Also refresh notifications
-        });
-
         socket.on('notificationCreated', notif => {
           if (notif.userId === user.id) {
             setNotifications(prev => [notif, ...prev]);
-            setUnreadUser(prev + 1);
+            setUnreadUser(prev => prev + 1);
             Toast.show({ type: 'info', text1: notif.message });
           }
         });
-
-
-        // Inside your socket useEffect
-socket.on('rewardCreated', (reward) => {
-  fetchRewards(); // REFRESH FROM API
-  Toast.show({ type: 'success', text1: 'New reward available!' });
-  setUnreadUser(p => p + 1);
-});
-
-        const Notifications = ({ navigation }) => {
-          return (
-            <FlatList
-              data={notifications}
-              keyExtractor={item => item._id}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  onPress={() => {
-                    setUnreadUser(prev => prev - 1);
-                    axios.put(`${BASE_URL}/notifications/${item._id}/read`);
-                    if (item.redirectData.tab === 'rewards') {
-                      setCurrentTab('rewards');
-                      const idx = rewards.findIndex(r => r._id === item.redirectData.focusId);
-                      requestAnimationFrame(() => {
-                        if (idx >= 0)
-                          flatListRef.current?.scrollToIndex({ index: idx, animated: true });
-                      });
-                    } else {
-                      // CHANGE: Redirect non-reward notifications to history tab
-                      setCurrentTab('history'); // Redirect to history tab for general notifications
-                    }
-                    navigation.goBack();
-                  }}
-                >
-                  <Text>{item.message}</Text>
-                </TouchableOpacity>
-              )}
-            />
-          );
-        };
-
-        // socket.on('barcode:updated', (data) => {
-        //   if (data?.userId?.toString() === user.id.toString()) {
-        //     fetchUserBarcodes(user.id);
-        //     if (typeof data?.pointsAwarded === 'number') {
-        //       setAddedPoints(data.pointsAwarded);
-        //       setShowPointsAnimation(true);
-        //     }
-        //     // CHANGE: Added toast and unread count for barcode update
-        //     Toast.show({ type: 'info', text1: 'Barcode updated' });
-        //     setUnreadUser((prev) => prev + 1);
-        //   }
-        // });
-
         socket.on('barcode:deleted', data => {
           if (data?.userId?.toString() === user.id.toString()) {
             fetchUserBarcodes(user.id);
-            // CHANGE: Added toast and unread count for barcode deletion
             Toast.show({ type: 'warning', text1: 'Barcode deleted' });
             setUnreadUser(prev => prev + 1);
           }
         });
-
-        socket.on('redemption:updated', data => {
-          if (data?.userId?.toString() === user.id.toString()) {
-            fetchRedemptions();
-            // CHANGE: Added toast and unread count for redemption update
-            Toast.show({ type: 'info', text1: 'Redemption status updated', text2: data.status });
-            setUnreadUser(prev => prev + 1);
-          }
-        });
-
         socket.on('userHistoryUpdated', entry => {
           setHistory(prev => {
             const newHistory = [entry, ...prev].sort(
@@ -436,19 +229,6 @@ socket.on('rewardCreated', (reward) => {
           Toast.show({ type: 'info', text1: 'History updated' });
           setUnreadUser(prev => prev + 1);
         });
-        socket.on('rewardCreated', reward => {
-          setRewards(prev => [...prev, reward]);
-          // CHANGE: Added toast and unread count for new reward
-          Toast.show({ type: 'success', text1: 'New reward available' });
-          setUnreadUser(prev => prev + 1);
-        });
-        socket.on('notificationCreated', notif => {
-          if (notif.userId === user.id) {
-            setNotifications(prev => [notif, ...prev]);
-            setUnreadUser(prev => prev + 1);
-            Toast.show({ type: 'info', text1: notif.message });
-          }
-        });
         socket.on('barcodeScanned', data => {
           if (data.userId === user.id) {
             unstable_batchedUpdates(() => {
@@ -459,46 +239,40 @@ socket.on('rewardCreated', (reward) => {
             Toast.show({ type: 'success', text1: 'Barcode scanned successfully' });
           }
         });
-
         socket.on('notification:updated', payload => {
           if (payload?.userId?.toString() === user.id.toString()) {
             fetchNotifications();
-            // CHANGE: Added toast and unread count for notification update
             Toast.show({ type: 'info', text1: 'Notification updated' });
             setUnreadUser(prev => prev + 1);
           }
         });
         socket.on('history:updated', payload => {
-          try {
-            if (payload?.userId?.toString() === user.id.toString()) {
-              // prepend new history items
-              setHistoryItems(prev => [...(payload.items || []), ...prev]);
-              // CHANGE: Added toast and unread count for history update
-              Toast.show({ type: 'info', text1: 'New history event' });
-              setUnreadUser(prev => prev + 1);
-            }
-          } catch (err) {
-            console.warn('history:update listener error', err);
+          if (payload?.userId?.toString() === user.id.toString()) {
+            setHistoryItems(prev => [...(payload.items || []), ...prev]);
+            Toast.show({ type: 'info', text1: 'New history event' });
+            setUnreadUser(prev => prev + 1);
           }
         });
-
-        // Removed duplicate reward:updated listener - already handled above
       } catch (err) {
-        console.warn('Socket error (user):', err);
+        console.warn('Socket setup error:', err);
       }
     };
-
     setupSocket();
-
     return () => {
-      // Clean up socket connection
       if (socketRef.current) {
-        socketRef.current.off('reward:updated'); // Remove all reward:updated listeners
+        socketRef.current.off();
         socketRef.current.disconnect();
         socketRef.current = null;
       }
     };
-  }, [user, fetchRewards]); // Added fetchRewards to dependencies
+  }, [
+    user,
+    fetchRewards,
+    fetchNotifications,
+    fetchRedemptions,
+    fetchUserBarcodes,
+    fetchUserHistory,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
@@ -513,7 +287,6 @@ socket.on('rewardCreated', (reward) => {
     }, [navigation])
   );
 
-  // ✅ Refresh rewards when screen comes into focus (as fallback if socket fails)
   useFocusEffect(
     useCallback(() => {
       if (user?.id) {
@@ -522,24 +295,21 @@ socket.on('rewardCreated', (reward) => {
       }
     }, [user, fetchRewards])
   );
-  // ✅ fetch history when "history" tab is active
+
   useFocusEffect(
     useCallback(() => {
       if (currentTab === 'history') {
-        fetchUserHistory(); // 👈 make sure this function is defined for user's own data
+        fetchUserHistory();
       }
     }, [currentTab])
   );
 
-  // ✅ Periodic polling fallback to refresh rewards every 10 seconds (if socket fails)
   useEffect(() => {
     if (!user?.id) return;
-    
     const pollingInterval = setInterval(() => {
       console.log('🔄 Periodic refresh - fetching rewards...');
       fetchRewards();
-    }, 10000); // Refresh every 10 seconds
-    
+    }, 10000);
     return () => clearInterval(pollingInterval);
   }, [user, fetchRewards]);
 
@@ -547,42 +317,23 @@ socket.on('rewardCreated', (reward) => {
     if (showScanner) {
       Animated.loop(
         Animated.sequence([
-          Animated.timing(scanLineAnim, {
-            toValue: 1,
-            duration: 800,
-            useNativeDriver: true,
-          }),
-          Animated.timing(scanLineAnim, {
-            toValue: 0,
-            duration: 600,
-            useNativeDriver: true,
-          }),
+          Animated.timing(scanLineAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+          Animated.timing(scanLineAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
         ])
       ).start();
     }
-  }, [showScanner]);
+  }, [showScanner, scanLineAnim]);
 
-  // NEW - star animation when points are added
-  // useEffect(() => {
-  //   if (showStar) {
-  //     Animated.sequence([
-  //       Animated.timing(starAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
-  //       Animated.timing(starAnim, { toValue: 1.2, duration: 300, useNativeDriver: true }),
-  //       Animated.timing(starAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-  //     ]).start(() => {
-  //       setTimeout(() => setShowStar(false), 800);
-  //     });
-  //   } else {
-  //     starAnim.setValue(0);
-  //   }
-  // }, [showStar]);
+  // Simple animation for points (expand and fade)
+  useEffect(() => {
+    if (showPointsAnimation) {
+      // Add your animation logic here, e.g., using Animated
+      setTimeout(() => setShowPointsAnimation(false), 1000);
+    }
+  }, [showPointsAnimation]);
 
   const scanLineTranslate = useMemo(
-    () =>
-      scanLineAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: [0, 180],
-      }),
+    () => scanLineAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 180] }),
     [scanLineAnim]
   );
 
@@ -610,24 +361,16 @@ socket.on('rewardCreated', (reward) => {
   const fetchUserProfile = useCallback(
     async userId => {
       if (!userId) return;
-
       try {
         setLoading(true);
-
-        // Token fetch
         const token = await AsyncStorage.getItem('token');
         if (!token) throw new Error('No token found');
-
-        // User fetch
         const response = await axios.get(`${BASE_URL}/users/${userId}`, {
           headers: { Authorization: token },
         });
-
-        // Check approval status
         if (response.data.status !== 'approved') {
           await AsyncStorage.clear();
           navigation.replace('Home');
-
           Toast.show({
             type: 'error',
             text1: 'Account Not Approved',
@@ -638,8 +381,6 @@ socket.on('rewardCreated', (reward) => {
           });
           return;
         }
-
-        // Build updated user object (⚡ adminId removed)
         const updatedUser = {
           id: response.data._id,
           name: response.data.name,
@@ -649,15 +390,11 @@ socket.on('rewardCreated', (reward) => {
           status: response.data.status,
           rewardProgress: response.data.rewardProgress || [],
         };
-
         setUser(updatedUser);
         await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
-
-        // ✅ Admin fetch block removed (no adminId usage)
       } catch (error) {
         console.log('Outer catch error:', error);
         if (await handleUnauthorized(error)) return;
-
         Toast.show({
           type: 'error',
           text1: 'Profile Fetch Failed',
@@ -690,11 +427,7 @@ socket.on('rewardCreated', (reward) => {
         const errorMessage = error.response?.data?.message || 'Failed to fetch barcodes';
         setFetchError(errorMessage);
         setBarcodes([]);
-        Toast.show({
-          type: 'error',
-          text1: 'Barcode Fetch Failed',
-          text2: errorMessage,
-        });
+        Toast.show({ type: 'error', text1: 'Barcode Fetch Failed', text2: errorMessage });
       } finally {
         setLoading(false);
       }
@@ -713,87 +446,53 @@ socket.on('rewardCreated', (reward) => {
       const response = await axios.get(`${BASE_URL}/rewards`, {
         headers: { Authorization: token },
       });
-      
-      // Validate response data
       if (!response || !response.data) {
         console.warn('⚠️ Invalid response from rewards API');
         setRewards([]);
         return;
       }
-      
       const rewardsData = Array.isArray(response.data) ? response.data : [];
       console.log('✅ Rewards fetched successfully, count:', rewardsData.length);
       setRewards(rewardsData);
     } catch (error) {
       console.error('❌ Error fetching rewards:', error);
-      console.error('Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-      });
-      
-      // Only show toast for non-network errors or if response exists
       if (error.response) {
         Toast.show({
           type: 'error',
           text1: 'Rewards Fetch Failed',
           text2: error.response?.data?.message || 'Could not load rewards.',
         });
-      } else if (error.message && !error.message.includes('Network')) {
-        // Don't spam toast for network errors (they're usually temporary)
-        console.warn('Network error - will retry automatically');
       }
-      
-      // Set empty array to prevent showing stale data
       setRewards([]);
     }
   }, []);
 
-  // NEW - fetch user history (timeline)
   const fetchUserHistory = async () => {
     try {
       const token = await AsyncStorage.getItem('token');
       if (!token) throw new Error('No token found');
-
       const res = await axios.get(`${BASE_URL}/history/user/${user.id}`, {
-        headers: { Authorization: token }, // keep same style you use elsewhere
+        headers: { Authorization: token },
       });
-
-      const history = Array.isArray(res.data) ? res.data : [];
-
-      // 1) Sort oldest -> newest (compute running total in chronological order)
-      history.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-      // 2) Compute transactionPoint and running net (oldest -> newest)
+      const historyData = Array.isArray(res.data) ? res.data : [];
+      historyData.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       let cumulative = 0;
-      const withNet = history.map(item => {
+      const withNet = historyData.map(item => {
         const amount = Number(item.details?.amount ?? item.details?.points ?? item.points ?? 0);
         const isDeposit = item.action === 'scan' || item.action === 'point_add';
         const change = isDeposit ? amount : -Math.abs(amount);
         cumulative += change;
-        return {
-          ...item,
-          transactionPoint: change,
-          netPoint: cumulative,
-        };
+        return { ...item, transactionPoint: change, netPoint: cumulative };
       });
-
-      // 3) Align final netPoint to current user.points (if available) so net matches user's current balance
       const lastNet = withNet.length ? withNet[withNet.length - 1].netPoint : 0;
       const userPoints = typeof user?.points === 'number' ? user.points : lastNet;
       const offset = userPoints - lastNet;
       const adjusted =
         offset !== 0 ? withNet.map(it => ({ ...it, netPoint: it.netPoint + offset })) : withNet;
-
-      // 4) Save ascending (oldest -> newest). Your UI reverses for newest-first presentation.
       setNetPointsHistory(adjusted);
     } catch (err) {
       console.error('Error fetching user history:', err);
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: 'Failed to load your history',
-      });
+      Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to load your history' });
     }
   };
 
@@ -884,7 +583,6 @@ socket.on('rewardCreated', (reward) => {
   const handleBarCodeScanned = useCallback(
     async ({ data }) => {
       setScanned(true);
-      // ✅ Use a short delay before hiding the scanner to prevent the UI from crashing (white screen bug).
       setTimeout(() => setShowScanner(false), 100);
       setLoading(true);
       setBarcodeData(data);
@@ -896,22 +594,18 @@ socket.on('rewardCreated', (reward) => {
           { value: data.toUpperCase(), location: user?.location || 'Unknown' },
           { headers: { Authorization: token } }
         );
-
         setLastAddedPoints(response.data.pointsAwarded);
-
-        // ✅ Fetch all necessary data *after* the scan is confirmed.
         await fetchUserProfile(user?.id);
         await fetchRewards();
         await fetchNotifications();
         await fetchUserBarcodes(user?.id);
-        setError(''); // Clear any previous errors.
-
+        setError('');
         Toast.show({
           type: 'success',
           text1: 'Scan Successful',
           text2: `You earned ${response.data.pointsAwarded} points!`,
-          autoHide: true, // ✅ FIX: Ensures the toast disappears automatically.
-          visibilityTime: 4000, // ✅ FIX: Sets the duration to 4 seconds.
+          autoHide: true,
+          visibilityTime: 4000,
         });
       } catch (error) {
         if (await handleUnauthorized(error)) return;
@@ -924,12 +618,11 @@ socket.on('rewardCreated', (reward) => {
           type: 'error',
           text1: 'Scan Failed',
           text2: errorMessage,
-          autoHide: true, // ✅ FIX: Ensures the toast disappears automatically.
-          visibilityTime: 4000, // ✅ FIX: Sets the duration to 4 seconds.
+          autoHide: true,
+          visibilityTime: 4000,
         });
       } finally {
         setLoading(false);
-        // ✅ Reset the scanned state after a delay so the user can scan another barcode.
         setTimeout(() => setScanned(false), 1500);
       }
     },
@@ -1008,52 +701,38 @@ socket.on('rewardCreated', (reward) => {
     setScanRegion(null);
   }, []);
 
-
   const handleChangePassword = async () => {
-
     if (!user?.id) {
-      alert("User not loaded. Please login again.");
+      alert('User not loaded. Please login again.');
       return;
     }
-
     if (!currentPassword || !newPassword) {
-      alert("Please fill both fields");
+      alert('Please fill both fields');
       return;
     }
-
     try {
-      // 🔑 Fetch token from AsyncStorage
       const token = await AsyncStorage.getItem('token');
       if (!token) {
-        alert("Session expired! Please login again.");
+        alert('Session expired! Please login again.');
         return;
       }
-
       const res = await axios.put(
         `${BASE_URL}/users/${user.id}/password`,
         { currentPassword, newPassword },
-        { headers: { Authorization: `Bearer ${token}` } } // token from AsyncStorage
+        { headers: { Authorization: `Bearer ${token}` } }
       );
-
-      alert(res.data.message || "Password updated!");
-
+      alert(res.data.message || 'Password updated!');
       setCurrentPassword('');
       setNewPassword('');
       setIsPasswordModalVisible(false);
-
     } catch (err) {
-      console.log("❌ Error:", err.response?.data || err);
-      alert(err.response?.data?.message || "Password change failed");
+      console.log('❌ Error:', err.response?.data || err);
+      alert(err.response?.data?.message || 'Password change failed');
     }
   };
 
   const handleSelectScanArea = useCallback(() => {
-    setScanRegion({
-      top: 100,
-      left: 50,
-      width: 200,
-      height: 200,
-    });
+    setScanRegion({ top: 100, left: 50, width: 200, height: 200 });
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -1066,15 +745,10 @@ socket.on('rewardCreated', (reward) => {
         text2: 'You have been logged out successfully.',
       });
     } catch (error) {
-      Toast.show({
-        type: 'error',
-        text1: 'Logout Failed',
-        text2: 'Could not log out.',
-      });
+      Toast.show({ type: 'error', text1: 'Logout Failed', text2: 'Could not log out.' });
     }
   }, [navigation]);
 
-  // NEW - Timeline item component (for History tab)
   const TimelineEvent = ({ item }) => (
     <View style={styles.timelineItem}>
       <View style={styles.timelineIcon}>
@@ -1099,7 +773,6 @@ socket.on('rewardCreated', (reward) => {
     </View>
   );
 
-  // NEW - History Tab wrapper (used in switch-case)
   const HistoryTab = () => (
     <View>
       <Text style={[styles.subtitle, { color: isDarkMode ? '#FFFFFF' : colors.text }]}>
@@ -1109,7 +782,7 @@ socket.on('rewardCreated', (reward) => {
         data={historyItems}
         keyExtractor={(it, idx) => it._id || `${it.action}-${idx}`}
         renderItem={({ item }) => <TimelineEvent item={item} />}
-        ListEmptyComponent={() =>
+        ListEmptyComponent={
           !loading ? (
             <Text style={[styles.cardText, { color: isDarkMode ? '#FFF' : colors.text }]}>
               No history yet.
@@ -1119,270 +792,359 @@ socket.on('rewardCreated', (reward) => {
       />
     </View>
   );
-  // Render Functions
+
+  const NotificationsTab = () => (
+    <FlatList
+      data={notifications}
+      keyExtractor={item => item._id}
+      renderItem={({ item }) => (
+        <TouchableOpacity
+          onPress={async () => {
+            setUnreadUser(prev => prev - 1);
+            try {
+              const token = await AsyncStorage.getItem('token');
+              await axios.put(
+                `${BASE_URL}/notifications/${item._id}/read`,
+                {},
+                { headers: { Authorization: token } }
+              );
+            } catch (err) {
+              console.error('Mark as read error:', err);
+            }
+            if (item.redirectData?.tab === 'rewards') {
+              setCurrentTab('rewards');
+              const idx = rewards.findIndex(r => r._id === item.redirectData.focusId);
+              requestAnimationFrame(() => {
+                if (idx >= 0) flatListRef.current?.scrollToIndex({ index: idx, animated: true });
+              });
+            } else {
+              setCurrentTab('history');
+            }
+          }}
+        >
+          <View style={styles.notificationItem}>
+            <Text style={styles.notificationText}>{item.message}</Text>
+            <Text style={styles.notificationDate}>{new Date(item.createdAt).toLocaleString()}</Text>
+          </View>
+        </TouchableOpacity>
+      )}
+      ListEmptyComponent={<Text style={styles.emptyText}>No notifications</Text>}
+    />
+  );
+
   const renderContent = useCallback(() => {
     switch (currentTab) {
+      case 'home':
+        return (
+          <>
+            {user && (
+              <>
+                <Card
+                  style={[
+                    styles.profileCard,
+                    { backgroundColor: isDarkMode ? '#333' : colors.surface },
+                  ]}
+                >
+                  <Card.Content style={{ paddingBottom: 12 }}>
+                    <TouchableOpacity
+                      style={{ position: 'absolute', top: 8, right: 8, zIndex: 10, padding: 6 }}
+                    >
+                      <Button
+                        mode="contained"
+                        onPress={() => setIsPasswordModalVisible(true)}
+                        style={styles.button}
+                        buttonColor={colors.primary}
+                        textColor="#FFF"
+                      >
+                        <MaterialIcons name="lock-reset" size={24} />
+                      </Button>
+                    </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.welcomeText,
+                        { color: isDarkMode ? '#FFD700' : colors.primary },
+                      ]}
+                    >
+                      Welcome back,
+                    </Text>
+                    <Text
+                      style={[styles.nameText, { color: isDarkMode ? '#FFD700' : colors.primary }]}
+                    >
+                      {user.name || 'Unknown'}
+                    </Text>
+                    <Text
+                      style={[styles.mobileText, { color: isDarkMode ? '#FFFFFF' : colors.text }]}
+                    >
+                      Mobile: {user.mobile || 'Unknown'}
+                    </Text>
+                  </Card.Content>
+                </Card>
+                <Card
+                  style={[
+                    styles.pointsBoxContainer,
+                    { backgroundColor: isDarkMode ? '#2A2A2A' : '#E3F2FD' },
+                  ]}
+                >
+                  <View style={styles.pointsRow}>
+                    <View style={styles.pointsColumn}>
+                      <Text
+                        style={[
+                          styles.pointsBoxLabel,
+                          { color: isDarkMode ? '#64B5F6' : '#1976D2' },
+                        ]}
+                      >
+                        Total Reward Points
+                      </Text>
+                      <Text
+                        style={[
+                          styles.pointsBoxValue,
+                          { color: isDarkMode ? '#81D4FA' : '#1976D2' },
+                        ]}
+                      >
+                        {user.points ?? 0}
+                      </Text>
+                    </View>
+                    <View style={styles.divider} />
+                    <View style={styles.pointsColumn}>
+                      <Text
+                        style={[
+                          styles.pointsBoxLabel,
+                          { color: isDarkMode ? '#A5D6A7' : '#2E7D32' },
+                        ]}
+                      >
+                        Total Items Purchased
+                      </Text>
+                      <Text
+                        style={[
+                          styles.pointsBoxValue,
+                          { color: isDarkMode ? '#81C784' : '#2E7D32' },
+                        ]}
+                      >
+                        {barcodes.length}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text
+                    style={[styles.pointsBoxHint, { color: isDarkMode ? '#90CAF9' : '#42A5F5' }]}
+                  >
+                    Keep scanning to earn more
+                  </Text>
+                </Card>
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-     // === ONLY REPLACE THIS PART IN renderContent() → case 'home' ===
-
-case 'home':
-  return (
-    <>
-      {user && (
-        <>
-          {/* === BOX 1: Welcome + Mobile + Change Password Button === */}
-          <Card
-            style={[
-              styles.profileCard,
-              { backgroundColor: isDarkMode ? '#333' : colors.surface },
-            ]}
-          >
-            <Card.Content style={{ paddingBottom: 12 }}>
-              {/* Bell Icon (kept as-is) */}
-              <TouchableOpacity
-                onPress={() => {
-                  // Optional: Add bell action if needed
-                }}
-                style={{
-                  position: 'absolute',
-                  top: 8,
-                  right: 8,
-                  zIndex: 10,
-                  padding: 6,
-                }}
-              >
                 <Button
                   mode="contained"
-                  onPress={() => setIsPasswordModalVisible(true)}
-                  style={styles.button}
+                  onPress={() => {
+                    setCurrentTab('scan');
+                    setShowScanner(true);
+                  }}
+                  style={{
+                    marginVertical: 20,
+                    borderRadius: 16,
+                    paddingVertical: 20,
+                    paddingHorizontal: 20,
+                    elevation: 6,
+                  }}
                   buttonColor={colors.primary}
                   textColor="#FFF"
+                  labelStyle={{
+                    fontSize: 20,
+                    fontWeight: '600',
+                    letterSpacing: 0.8,
+                  }}
                 >
-                  <MaterialIcons name="lock-reset" size={24} />
+                  Scan Barcode
                 </Button>
-              </TouchableOpacity>
 
-              {/* Welcome & Mobile */}
-              <Text
-                style={[
-                  styles.welcomeText,
-                  { color: isDarkMode ? '#FFD700' : colors.primary },
-                ]}
-              >
-                Welcome back,
-              </Text>
-              <Text
-                style={[
-                  styles.nameText,
-                  { color: isDarkMode ? '#FFD700' : colors.primary },
-                ]}
-              >
-                {user.name || 'Unknown'}
-              </Text>
-              <Text
-                style={[
-                  styles.mobileText,
-                  { color: isDarkMode ? '#FFFFFF' : colors.text },
-                ]}
-              >
-                Mobile: {user.mobile || 'Unknown'}
-              </Text>
-            </Card.Content>
-          </Card>
-
-          {/* === BOX 2: Total Points + Total Items Purchased === */}
-          <Card
-            style={[
-              styles.pointsBoxContainer,
-              { backgroundColor: isDarkMode ? '#2A2A2A' : '#E3F2FD' },
-            ]}
-          >
-            <View style={styles.pointsRow}>
-              {/* Total Points */}
-              <View style={styles.pointsColumn}>
-                <Text
-                  style={[
-                    styles.pointsBoxLabel,
-                    { color: isDarkMode ? '#64B5F6' : '#1976D2' },
-                  ]}
-                >
-                  Total Reward Points
-                </Text>
-                <Text
-                  style={[
-                    styles.pointsBoxValue,
-                    { color: isDarkMode ? '#81D4FA' : '#1976D2' },
-                  ]}
-                >
-                  {user.points ?? 0}
-                </Text>
-              </View>
-
-              {/* Divider */}
-              <View style={styles.divider} />
-
-              {/* Total Items Purchased */}
-              <View style={styles.pointsColumn}>
-                <Text
-                  style={[
-                    styles.pointsBoxLabel,
-                    { color: isDarkMode ? '#A5D6A7' : '#2E7D32' },
-                  ]}
-                >
-                  Total Items Purchased
-                </Text>
-                <Text
-                  style={[
-                    styles.pointsBoxValue,
-                    { color: isDarkMode ? '#81C784' : '#2E7D32' },
-                  ]}
-                >
-                  {barcodes.length}
-                </Text>
-              </View>
-            </View>
-
-            <Text
-              style={[
-                styles.pointsBoxHint,
-                { color: isDarkMode ? '#90CAF9' : '#42A5F5' },
-              ]}
-            >
-              Keep scanning to earn more
-            </Text>
-          </Card>
-
-          {/* Scan Button */}
-          <Button
-            mode="contained"
-            onPress={() => {
-              setCurrentTab('scan');
-              setShowScanner(true);
-            }}
-            style={styles.button}
-            buttonColor={colors.primary}
-            textColor="#FFF"
-            labelStyle={styles.buttonLabel}
-          >
-            Scan Barcode
-          </Button>
-
-          {/* Rewards Slider */}
-          <View style={styles.sliderContainer}>
-            {rewards.length > 0 && (
-              <Swiper autoplay autoplayTimeout={3} height={350} showsPagination loop>
-                {rewards.map((reward, index) => {
-                  const imageSource = getRewardImageSource(reward.image);
-                  return (
-                    <View key={reward._id || `reward-${index}`} style={styles.slide}>
-                    <TouchableOpacity
-                      onPress={() => {
-                        setCurrentTab('rewards');
-                        const idx = rewards.findIndex(r => r._id === reward._id);
-                        requestAnimationFrame(() => {
-                          if (idx >= 0)
-                            flatListRef.current?.scrollToIndex({ index: idx, animated: true });
-                        });
-                      }}
+                {/* <View style={styles.sliderContainer}>
+                  {rewards.length > 0 ? (
+                    <Swiper
+                      autoplay={false}
+                      autoplayTimeout={3}
+                      height={350}
+                      showsPagination
+                      loop={false}
+                      removeClippedSubviews={false}
+                      key={rewards.map(r => r._id).join('-')}
                     >
-                      <Text style={styles.sliderText}>{reward.name}</Text>
-                      {imageSource ? (
-                        <Image source={imageSource} style={styles.sliderImage} />
-                      ) : (
-                        <View style={styles.imagePlaceholder}>
-                          <MaterialIcons name="image-not-supported" size={48} color="#9e9e9e" />
-                          <Text style={styles.placeholderText}>No image available</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                      <View style={styles.pointsContainer} pointerEvents="none">
-                        <View style={styles.pointRow}>
-                          <View style={styles.pointBadge}>
-                            <Text style={styles.pointLabel}>Get Points</Text>
-                            <Text style={styles.pointValue}>{reward.price}</Text>
+                      {rewards.map((reward, index) => (
+                        <View key={reward._id || `reward-${index}`} style={styles.slide}>
+                          <TouchableOpacity
+                            onPress={() => {
+                              setCurrentTab('rewards');
+                              const idx = rewards.findIndex(r => r._id === reward._id);
+                              requestAnimationFrame(() => {
+                                if (idx >= 0)
+                                  flatListRef.current?.scrollToIndex({
+                                    index: idx,
+                                    animated: true,
+                                  });
+                              });
+                            }}
+                          >
+                            <Text style={styles.sliderText}>{reward.name}</Text>
+                            {reward.image ? (
+                              <Image
+                                source={{ uri: reward.image }}
+                                style={styles.rewardImage}
+                                resizeMode="contain"
+                              />
+                            ) : (
+                              <View style={styles.imagePlaceholder}>
+                                <MaterialIcons
+                                  name="image-not-supported"
+                                  size={48}
+                                  color="#9e9e9e"
+                                />
+                                <Text style={styles.placeholderText}>No image available</Text>
+                              </View>
+                            )}
+                          </TouchableOpacity>
+                          <View style={styles.pointsContainer} pointerEvents="none">
+                            <View style={styles.pointRow}>
+                              <View style={styles.pointBadge}>
+                                <Text style={styles.pointLabel}>Get Points</Text>
+                                <Text style={styles.pointValue}>{reward.price}</Text>
+                              </View>
+                              <View style={styles.pointBadge}>
+                                <Text style={styles.pointLabel}>Redeem</Text>
+                                <Text style={styles.pointValue}>{reward.bundalValue}</Text>
+                              </View>
+                            </View>
+                            <View style={styles.payoutBadge}>
+                              <Text style={styles.payoutLabel}>Payout</Text>
+                              <Text style={styles.payoutValue}>{reward.pointsRequired}</Text>
+                            </View>
                           </View>
-                          <View style={styles.pointBadge}>
-                            <Text style={styles.pointLabel}>Redeem</Text>
-                            <Text style={styles.pointValue}>{reward.bundalValue}</Text>
-                          </View>
                         </View>
-                        <View style={styles.payoutBadge}>
-                          <Text style={styles.payoutLabel}>Payout</Text>
-                          <Text style={styles.payoutValue}>{reward.pointsRequired}</Text>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })}
-                </Swiper>
-              )}
-            </View>
-
-            {/* Admin Card (if exists) */}
-            {admin && (
-              <Card
-                style={[styles.card, { backgroundColor: isDarkMode ? '#333' : colors.surface }]}
-              >
-                <Card.Content>
-                  <Text
-                    style={[
-                      styles.cardText,
-                      { color: isDarkMode ? '#FFD700' : colors.text, fontWeight: 'bold' },
-                    ]}
+                      ))}
+                    </Swiper>
+                  ) : (
+                    <Text style={[styles.emptyText, { textAlign: 'center', marginVertical: 20 }]}>
+                      No rewards available
+                    </Text>
+                  )}
+                </View> */}
+                {admin && (
+                  <Card
+                    style={[styles.card, { backgroundColor: isDarkMode ? '#333' : colors.surface }]}
                   >
-                    Assigned Admin: {admin.name || 'Unknown'}
-                  </Text>
-                  <Text
-                    style={[styles.cardText, { color: isDarkMode ? '#FFFFFF' : colors.text }]}
-                  >
-                    Admin Unique Code: {admin.uniqueCode || 'N/A'}
-                  </Text>
-                </Card.Content>
-              </Card>
+                    <Card.Content>
+                      <Text
+                        style={[
+                          styles.cardText,
+                          { color: isDarkMode ? '#FFD700' : colors.text, fontWeight: 'bold' },
+                        ]}
+                      >
+                        Assigned Admin: {admin.name || 'Unknown'}
+                      </Text>
+                      <Text
+                        style={[styles.cardText, { color: isDarkMode ? '#FFFFFF' : colors.text }]}
+                      >
+                        Admin Unique Code: {admin.uniqueCode || 'N/A'}
+                      </Text>
+                    </Card.Content>
+                  </Card>
+                )}
+              </>
             )}
           </>
-        )}
-      </>
-    );
+        );
+      case 'rewards':
+        return (
+          <View style={styles.rewardsContainer}>
+            <Text style={[styles.sectionTitle, { color: isDarkMode ? '#FFFFFF' : colors.text }]}>
+              Available Rewards
+            </Text>
+            <FlatList
+              ref={flatListRef}
+              data={rewards}
+              keyExtractor={item => item._id}
+              renderItem={({ item: reward }) => (
+                <View
+                  style={[styles.rewardItem, { backgroundColor: isDarkMode ? '#333' : '#fff' }]}
+                >
+                  <Text
+                    style={[styles.rewardName, { color: isDarkMode ? '#FFFFFF' : colors.text }]}
+                  >
+                    {reward.name}
+                  </Text>
+                  {reward.image ? (
+                    <Image
+                      source={{ uri: reward.image }}
+                      style={styles.rewardImage}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <View style={styles.imagePlaceholder}>
+                      <MaterialIcons name="image-not-supported" size={48} color="#9e9e9e" />
+                      <Text style={styles.placeholderText}>No image</Text>
+                    </View>
+                  )}
+                  {/* <Text
+                    style={[styles.rewardDetails, { color: isDarkMode ? '#FFFFFF' : colors.text }]}
+                  >
+                    Price: {reward.price} | Bundle: {reward.bundalValue} | Points Needed:{' '}
+                    {reward.pointsRequired}
+                  </Text> */}
 
+                  <View style={styles.pointsContainer} pointerEvents="none">
+                    <View style={styles.pointRow}>
+                      <View style={styles.pointBadge}>
+                        <Text style={styles.pointLabel}>Get Points</Text>
+                        <Text style={styles.pointValue}>{reward.price}</Text>
+                      </View>
+                      <View style={styles.pointBadge}>
+                        <Text style={styles.pointLabel}>Redeem</Text>
+                        <Text style={styles.pointValue}>{reward.bundalValue}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.payoutBadge}>
+                      <Text style={styles.payoutLabel}>Payout</Text>
+                      <Text style={styles.payoutValue}>{reward.pointsRequired}</Text>
+                    </View>
+                  </View>
 
-
-
-
-
-
-
-        
-
+                  <Button
+                    mode="contained"
+                    onPress={async () => {
+                      if (user?.points >= reward.pointsRequired) {
+                        try {
+                          const token = await AsyncStorage.getItem('token');
+                          await axios.post(
+                            `${BASE_URL}/redemptions`,
+                            { rewardId: reward._id },
+                            { headers: { Authorization: token } }
+                          );
+                          Toast.show({ type: 'success', text1: `Redeeming ${reward.name}...` });
+                          fetchRedemptions();
+                          fetchUserProfile(user.id);
+                        } catch (err) {
+                          Toast.show({
+                            type: 'error',
+                            text1: 'Redemption failed',
+                            text2: err.response?.data?.message,
+                          });
+                        }
+                      } else {
+                        Toast.show({ type: 'error', text1: 'Insufficient points!' });
+                      }
+                    }}
+                    style={styles.redeemButton}
+                    buttonColor={colors.primary}
+                  >
+                    Redeem ({reward.pointsRequired} pts)
+                  </Button>
+                </View>
+              )}
+              ListEmptyComponent={
+                <Text style={[styles.emptyText, { color: isDarkMode ? '#FFFFFF' : colors.text }]}>
+                  No rewards available yet.
+                </Text>
+              }
+              contentContainerStyle={{ paddingBottom: 80 }}
+            />
+          </View>
+        );
       case 'scan':
         return Platform.OS === 'web' ? (
           <Card style={[styles.card, { backgroundColor: isDarkMode ? '#333' : colors.surface }]}>
@@ -1402,7 +1164,7 @@ case 'home':
             <Button
               mode="contained"
               onPress={handleScanAction}
-              style={styles.button}
+              style={styles.button }
               buttonColor={colors.primary}
               textColor={isDarkMode ? '#FFFFFF' : '#212121'}
               disabled={showScanner || loading}
@@ -1467,12 +1229,11 @@ case 'home':
                       <Text
                         style={[styles.success, { color: isDarkMode ? '#00FF00' : colors.accent }]}
                       >
-                        ✅ Success! Points added.
+                         Success! Points added.
                       </Text>
-                      {/* 🔥 New Added Points & Total Points */}
                       <Text
                         style={{
-                          fontSize: 24, // Big font
+                          fontSize: 24,
                           fontWeight: 'bold',
                           color: isDarkMode ? '#FFFFFF' : '#000000',
                           marginTop: 8,
@@ -1488,7 +1249,7 @@ case 'home':
                           marginTop: 4,
                         }}
                       >
-                        🎯 Total Points: {user?.points}
+                         Total Points: {user?.points}
                       </Text>
                     </>
                   )}
@@ -1497,16 +1258,8 @@ case 'home':
             )}
           </>
         );
-
-      // case 'history':
-      //   return (
-      //     <HistoryComponent
-      //       netPointsHistory={netPointsHistory}
-      //       isDarkMode={isDarkMode}
-      //       colors={colors}
-      //     />
-      //   );
-
+      case 'history':
+        return <HistoryTab />;
       case 'barcode':
         return (
           <>
@@ -1538,7 +1291,6 @@ case 'home':
               keyExtractor={item => item._id || `barcode-${item.value}`}
               renderItem={({ item }) => (
                 <Card
-                  key={item._id}
                   style={[styles.card, { backgroundColor: isDarkMode ? '#333' : colors.surface }]}
                 >
                   <Card.Content>
@@ -1571,7 +1323,7 @@ case 'home':
                   </Card.Content>
                 </Card>
               )}
-              ListEmptyComponent={() =>
+              ListEmptyComponent={
                 !loading && (
                   <Text style={[styles.emptyText, { color: isDarkMode ? '#FFFFFF' : colors.text }]}>
                     No barcodes scanned yet.
@@ -1586,10 +1338,6 @@ case 'home':
             />
           </>
         );
-
-
-
-
       default:
         return null;
     }
@@ -1619,10 +1367,10 @@ case 'home':
     fetchUserProfile,
     clearNotification,
     clearRedemption,
-    handleChangePassword
+    handleChangePassword,
+    historyItems,
   ]);
 
-  // Component Body
   if (hasPermission === false) {
     return (
       <Text style={[styles.permissionText, { color: isDarkMode ? '#FFFFFF' : colors.text }]}>
@@ -1638,22 +1386,6 @@ case 'home':
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       )}
-      {/* <View style={styles.header}>
-        <ThemeToggle style={styles.toggle} />
-        <Button
-          mode="contained"
-          onPress={handleLogout}
-          style={styles.logoutButton}
-          buttonColor={colors.error}
-          textColor="#FFFFFF"
-          labelStyle={styles.buttonLabel}
-        >
-          Logout
-        </Button>
-      </View> */}
-      {/* <Text style={[styles.title, { color: isDarkMode ? '#FFFFFF' : colors.text }]}>
-        User Dashboard
-      </Text> */}
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         {renderContent()}
       </ScrollView>
@@ -1728,15 +1460,15 @@ case 'home':
             Scan
           </Text>
         </TouchableOpacity>
-        {/* <TouchableOpacity
-          style={[styles.tabItem, currentTab === 'history' && styles.activeTab]}
-          onPress={() => setCurrentTab('history')}
+        <TouchableOpacity
+          style={[styles.tabItem, currentTab === 'rewards' && styles.activeTab]}
+          onPress={() => setCurrentTab('rewards')}
         >
           <MaterialIcons
-            name="history"
+            name="card-giftcard"
             size={24}
             color={
-              currentTab === 'history'
+              currentTab === 'rewards'
                 ? isDarkMode
                   ? '#FFD700'
                   : colors.primary
@@ -1750,7 +1482,7 @@ case 'home':
               styles.tabText,
               {
                 color:
-                  currentTab === 'history'
+                  currentTab === 'rewards'
                     ? isDarkMode
                       ? '#FFD700'
                       : colors.primary
@@ -1760,9 +1492,9 @@ case 'home':
               },
             ]}
           >
-            History
+            Rewards
           </Text>
-        </TouchableOpacity> */}
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tabItem, currentTab === 'barcode' && styles.activeTab]}
           onPress={() => setCurrentTab('barcode')}
@@ -1799,14 +1531,14 @@ case 'home':
           </Text>
         </TouchableOpacity>
         {/* <TouchableOpacity
-          style={[styles.tabItem, currentTab === 'rewards' && styles.activeTab]}
-          onPress={() => setCurrentTab('rewards')}
+          style={[styles.tabItem, currentTab === 'history' && styles.activeTab]}
+          onPress={() => setCurrentTab('history')}
         >
           <MaterialIcons
-            name="card-giftcard"
+            name="history"
             size={24}
             color={
-              currentTab === 'rewards'
+              currentTab === 'history'
                 ? isDarkMode
                   ? '#FFD700'
                   : colors.primary
@@ -1820,7 +1552,7 @@ case 'home':
               styles.tabText,
               {
                 color:
-                  currentTab === 'rewards'
+                  currentTab === 'history'
                     ? isDarkMode
                       ? '#FFD700'
                       : colors.primary
@@ -1830,84 +1562,73 @@ case 'home':
               },
             ]}
           >
-            Rewards
+            History
           </Text>
         </TouchableOpacity> */}
-
-        <Modal visible={isPasswordModalVisible} transparent animationType="slide">
-          <View style={styles.modalContainer}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Change Password</Text>
-
-              <TextInput
-                placeholder="Current Password"
-                value={currentPassword}
-                onChangeText={setCurrentPassword}
-                secureTextEntry
-                style={styles.input}
-              />
-
-              <TextInput
-                placeholder="New Password"
-                value={newPassword}
-                onChangeText={setNewPassword}
-                secureTextEntry
-                style={styles.input}
-              />
-
-              {/* ✅ Buttons */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 20 }}>
-
-                {/* Change Password */}
-                <Button
-                  mode="contained"
-                  onPress={handleChangePassword}
-                  style={{ flex: 1, marginRight: 10 }}
-                >
-                  Change
-                </Button>
-
-                {/* Cancel Button */}
-                <Button
-                 mode="outlined"
-                  onPress={() => {
-                    setCurrentPassword('');
-                    setNewPassword('');
-                    setIsPasswordModalVisible(false);
-                  }}
-                  style={{ flex: 1, marginLeft: 10 }}
-                >
-                  Cancel
-                </Button>
-
-              </View>
+      </View>
+      <Modal visible={isPasswordModalVisible} transparent animationType="slide">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Change Password</Text>
+            <TextInput
+              placeholder="Current Password"
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              secureTextEntry
+              style={styles.input}
+            />
+            <TextInput
+              placeholder="New Password"
+              value={newPassword}
+              onChangeText={setNewPassword}
+              secureTextEntry
+              style={styles.input}
+            />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 20 }}>
+              <Button
+                mode="contained"
+                onPress={handleChangePassword}
+                style={{ flex: 1, marginRight: 10 }}
+              >
+                Change
+              </Button>
+              <Button
+                mode="outlined"
+                onPress={() => {
+                  setCurrentPassword('');
+                  setNewPassword('');
+                  setIsPasswordModalVisible(false);
+                }}
+                style={{ flex: 1, marginLeft: 10 }}
+              >
+                Cancel
+              </Button>
             </View>
           </View>
-        </Modal>
-
-      </View>
+        </View>
+      </Modal>
     </View>
   );
-} // End of UserDashboard function
+}
 
-// Styles
+// Styles (added missing ones for new tabs)
 const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
-    justifyContent: 'center', // vertically center
-    alignItems: 'center', // horizontally center
-    backgroundColor: 'rgba(0,0,0,0.5)', // semi-transparent background
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   modalContent: {
-    width: '85%', // modal width
+    width: '85%',
     backgroundColor: '#fff',
     borderRadius: 10,
     padding: 20,
-    shadowColor: '#000', // shadow for iOS
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
-    elevation: 5, // shadow for Android
+    elevation: 5,
   },
   modalTitle: {
     fontSize: 20,
@@ -1960,7 +1681,6 @@ const styles = StyleSheet.create({
     textShadowRadius: 2,
   },
   scrollContent: { padding: 16, paddingBottom: 80 },
-  // scrollContent: { padding: 12, paddingBottom: 100, flexGrow: 1 },
   profileCard: {
     marginVertical: 10,
     borderRadius: 12,
@@ -2028,20 +1748,23 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   button: {
-    marginVertical: 9,
-    borderRadius: 12,
-    paddingVertical: 2,
+    marginVertical: 12,
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    backgroundColor: '#4C9EEB',
     shadowColor: '#000',
-    shadowOffset: { width: 2, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 5,
   },
   buttonLabel: {
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
     textAlign: 'center',
-    adjustsFontSizeToFit: true,
-    minimumFontScale: 0.7,
-    paddingHorizontal: 5,
+    letterSpacing: 0.5,
   },
   error: {
     marginTop: 10,
@@ -2106,12 +1829,10 @@ const styles = StyleSheet.create({
   tabItem: { flex: 1, alignItems: 'center', paddingBottom: 8 },
   activeTab: { borderBottomWidth: 2, borderBottomColor: '#FFD700' },
   tabText: { fontSize: 12, marginTop: 4 },
-
   sliderContainer: {
     height: 460,
     marginBottom: 25,
   },
-
   slide: {
     flex: 1,
     justifyContent: 'flex-start',
@@ -2138,7 +1859,6 @@ const styles = StyleSheet.create({
   sliderImage: {
     width: '100%',
     height: 200,
-    resizeMode: 'cover',
     borderRadius: 16,
     marginBottom: 16,
     backgroundColor: '#f5f5f5',
@@ -2217,55 +1937,42 @@ const styles = StyleSheet.create({
     color: '#4caf50',
   },
   rewardsContainer: {
-    padding: 20,
-    backgroundColor: '#f9f9f9',
+    flex: 1,
+    padding: 16,
   },
-
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 12,
     textAlign: 'center',
-    color: '#222',
   },
-
   rewardItem: {
     marginVertical: 12,
-    borderRadius: 12,
-    elevation: 6,
+    padding: 16,
     backgroundColor: '#fff',
-    padding: 10,
+    borderRadius: 12,
+    elevation: 4,
   },
-
   rewardImage: {
     width: '100%',
-    height: 300,
-    resizeMode: 'contain',
-    alignSelf: 'center',
-    marginVertical: 10,
+    height: 200,
     borderRadius: 8,
+    marginVertical: 8,
   },
-  payoutText: {
+  rewardName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#111',
-    marginTop: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: '#f3f3f3', // soft highlight (optional)
-    borderRadius: 8,
-    alignSelf: 'center',
+    marginBottom: 8,
   },
-
-  rewardName: { fontSize: 18, fontWeight: 'bold' },
-  rewardDetails: { fontSize: 14, marginBottom: 10 },
-  // progressBar: { height: 10, borderRadius: 5, marginBottom: 5 }, remove
-  progressBar: { height: 10, backgroundColor: '#e0e0e0', borderRadius: 5, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: '#4CAF50' },
-
-  progressText: { fontSize: 12 },
-  redeemButton: { marginTop: 10, borderRadius: 12 },
-  notificationContent: { flex: 1 },
+  rewardDetails: {
+    fontSize: 14,
+    marginBottom: 12,
+    color: '#666',
+  },
+  redeemButton: {
+    marginTop: 10,
+    borderRadius: 12,
+  },
   notificationItem: {
     padding: 15,
     borderRadius: 10,
@@ -2273,116 +1980,26 @@ const styles = StyleSheet.create({
     elevation: 2,
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  read: { opacity: 0.7 },
-  unread: { elevation: 4 },
-  notificationText: { fontSize: 16 },
-  notificationDate: { fontSize: 12 },
-  historyItem: { marginVertical: 10, borderRadius: 12, elevation: 6 },
-  historyImage: { width: 80, height: 80, borderRadius: 10, marginBottom: 10 },
-  historyName: { fontSize: 16, fontWeight: 'bold' },
-  // historyDetails: { fontSize: 14 },
-  // rewardAchieved: { color: '#2196F3', fontWeight: 'bold', textAlign: 'center', marginTop: 5 },
-  remainingPoints: { color: '#FF9800', textAlign: 'center', marginTop: 5 },
-
-  historyContainer: { padding: 10 },
-  sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
-
-  rewardAchieved: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2196F3',
-    marginTop: 8,
-  },
-  remainingPoints: {
-    fontSize: 14,
-    color: '#FF5722',
-    marginTop: 6,
-  },
-  redeemButton: {
-    marginTop: 10,
-    borderRadius: 6,
-  },
-
-  rewardHistoryHeader: {
-    flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginVertical: 10,
-    paddingHorizontal: 10,
   },
-  toggleButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 5,
-    backgroundColor: 'transparent',
-  },
-  toggleButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  clearButton: { marginTop: 5 },
-  starContainer: {
-    position: 'absolute',
-    zIndex: 10,
-    backgroundColor: 'green',
-    borderRadius: 50,
-    padding: 20,
+  notificationText: { fontSize: 16, flex: 1 },
+  notificationDate: { fontSize: 12, color: '#666' },
+  timelineItem: {
+    flexDirection: 'row',
+    marginVertical: 8,
     alignItems: 'center',
   },
-  starText: { position: 'absolute', top: 40, color: 'white', fontSize: 24 },
-    // === STYLISH POINTS BOX (matches your image) ===
-  pointsBoxContainer: {
-    marginTop: 16,
-    backgroundColor: '#E3F2FD',
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+  timelineIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#BBDEFB',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    marginRight: 12,
   },
-  pointsBoxLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1976D2',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  pointsBoxValue: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#1976D2',
-    lineHeight: 56,
-  },
-  pointsBoxHint: {
-    fontSize: 14,
-    color: '#42A5F5',
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-    // === NEW STYLES FOR BOXES ===
-  welcomeText: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  nameText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 6,
-  },
-  mobileText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
+  timelineContent: { flex: 1 },
+  smallText: { fontSize: 12, color: '#666' },
   pointsBoxContainer: {
     marginVertical: 16,
     borderRadius: 20,
@@ -2395,10 +2012,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
   },
   pointsRow: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+    height: '50%',
   },
   pointsColumn: {
     flex: 1,
@@ -2429,15 +2047,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
+  welcomeText: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  nameText: {
+    fontSize: 30,
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  mobileText: {
+    fontSize: 18,
+    fontWeight: '500',
+  },
   welcomeBackText: {
-  fontSize: 26,
-  fontWeight: '800',
-  fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
-  letterSpacing: 0.5,
-  textShadowColor: 'rgba(0, 0, 0, 0.15)',
-  textShadowOffset: { width: 1, height: 1 },
-  textShadowRadius: 3,
-  marginBottom: 8,
-  textAlign: 'left',
-},
+    fontSize: 26,
+    fontWeight: '800',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
+    letterSpacing: 0.5,
+    textShadowColor: 'rgba(0, 0, 0, 0.15)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+    marginBottom: 8,
+    textAlign: 'left',
+  },
 });

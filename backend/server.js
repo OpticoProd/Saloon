@@ -116,7 +116,7 @@ const PreGeneratedBarcodeSchema = new mongoose.Schema({
 const RewardSchema = new mongoose.Schema({
   name: { type: String, required: true },
   price: { type: Number, required: true },
-  bundalValue:{type: Number},
+  bundalValue: { type: Number },
   pointsRequired: { type: Number, required: true },
   image: { type: String }, // Base64 or URL for reward image
   adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -257,7 +257,6 @@ const authenticateToken = async (req, res, next) => {
     return res.status(401).json({ message: 'Invalid token' });
   }
 };
-
 
 // Middleware to check roles
 const checkRole = roles => (req, res, next) => {
@@ -768,10 +767,6 @@ app.put('/admins/:id/password', authenticateToken, async (req, res) => {
   }
 });
 
-
-
-
-
 // Get all users (admin or superadmin only)
 app.get('/users', authenticateToken, async (req, res) => {
   try {
@@ -852,12 +847,6 @@ app.get('/users/:id/password', authenticateToken, async (req, res) => {
   }
 });
 
-
-
-
-
-
-
 // Change password endpoint with debug logs
 app.put('/users/:id/password', authenticateToken, async (req, res) => {
   try {
@@ -865,7 +854,9 @@ app.put('/users/:id/password', authenticateToken, async (req, res) => {
     console.log('💡 Request body:', req.body);
     console.log('💡 Target user ID param:', req.params.id);
 
-    const targetUser = await User.findById(req.params.id).select('+password +plainPassword +role +adminId');
+    const targetUser = await User.findById(req.params.id).select(
+      '+password +plainPassword +role +adminId'
+    );
     console.log('💡 Fetched target user:', targetUser);
 
     if (!targetUser) {
@@ -965,13 +956,6 @@ app.put('/users/:id/password', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Server error changing password' });
   }
 });
-
-
-
-
-
-
-
 
 // Update user status
 app.put('/users/:id/status', authenticateToken, async (req, res) => {
@@ -1926,7 +1910,7 @@ app.put('/rewards/:id', authenticateToken, checkRole(['admin', 'superadmin']), a
     reward.pointsRequired = pointsRequired || reward.pointsRequired;
     reward.image = image || reward.image;
     await reward.save();
-    
+
     // Emit socket event to notify all users about the reward update
     if (global.emitters) {
       console.log('📢 Emitting reward:updated event for reward:', reward._id);
@@ -1939,7 +1923,7 @@ app.put('/rewards/:id', authenticateToken, checkRole(['admin', 'superadmin']), a
     } else {
       console.warn('⚠️ global.emitters not available - socket may not be initialized');
     }
-    
+
     res.json({ message: 'Reward updated', reward });
   } catch (error) {
     console.error('Error updating reward:', error);
@@ -1960,7 +1944,7 @@ app.delete(
       }
       const adminId = reward.adminId;
       await reward.deleteOne();
-      
+
       // Emit socket event to notify all users about the reward deletion
       if (global.emitters) {
         console.log('📢 Emitting reward:deleted event for reward:', req.params.id);
@@ -1971,7 +1955,7 @@ app.delete(
         });
         console.log('✅ Reward deletion event emitted');
       }
-      
+
       res.json({ message: 'Reward deleted' });
     } catch (error) {
       console.error('Error deleting reward:', error);
@@ -2063,8 +2047,6 @@ app.get('/notifications', authenticateToken, async (req, res) => {
   }
 });
 
-
-
 // Mark notification as read
 app.put('/notifications/:id/read', authenticateToken, async (req, res) => {
   try {
@@ -2093,14 +2075,11 @@ app.put('/notifications/:id/read', authenticateToken, async (req, res) => {
 
     console.log(`Notification ${notification._id} marked as read by ${req.user._id}`);
     res.json({ message: 'Notification marked as read' });
-
   } catch (error) {
     console.error('Error marking notification:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-
 
 // Submit redemption request
 app.post('/redemptions', authenticateToken, async (req, res) => {
@@ -2594,7 +2573,6 @@ app.get('/history/user/:id', authenticateToken, async (req, res) => {
   }
 });
 
-
 // Top users by added points (scans + manual adds only)
 app.get(
   '/stats/top-users',
@@ -2642,7 +2620,7 @@ app.get(
           },
         },
         { $sort: { totalAdded: -1 } },
-        { $limit: 3 },  // Updated to 3 to match "Top 3 Users"
+        { $limit: 3 }, // Updated to 3 to match "Top 3 Users"
       ]);
 
       // Join with users info
@@ -2673,7 +2651,6 @@ app.get(
     }
   }
 );
-
 
 app.get(
   '/history/admin',
