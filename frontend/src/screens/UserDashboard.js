@@ -492,7 +492,7 @@ export default function UserDashboard({ navigation }) {
       setNetPointsHistory(adjusted);
     } catch (err) {
       console.error('Error fetching user history:', err);
-      Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to load your history' });
+      // Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to load your history' });
     }
   };
 
@@ -1090,21 +1090,21 @@ export default function UserDashboard({ navigation }) {
                   <View style={styles.pointsContainer} pointerEvents="none">
                     <View style={styles.pointRow}>
                       <View style={styles.pointBadge}>
-                        <Text style={styles.pointLabel}>Get Points</Text>
+                        <Text style={styles.pointLabel}>Total Points Get Reward</Text>
                         <Text style={styles.pointValue}>{reward.price}</Text>
                       </View>
                       <View style={styles.pointBadge}>
-                        <Text style={styles.pointLabel}>Redeem</Text>
+                        <Text style={styles.pointLabel}>Redeem points</Text>
                         <Text style={styles.pointValue}>{reward.bundalValue}</Text>
                       </View>
                     </View>
                     <View style={styles.payoutBadge}>
-                      <Text style={styles.payoutLabel}>Payout</Text>
+                      <Text style={styles.payoutLabel}>₹ Payout</Text>
                       <Text style={styles.payoutValue}>{reward.pointsRequired}</Text>
                     </View>
                   </View>
 
-                  <Button
+                  {/* <Button
                     mode="contained"
                     onPress={async () => {
                       if (user?.points >= reward.pointsRequired) {
@@ -1132,8 +1132,8 @@ export default function UserDashboard({ navigation }) {
                     style={styles.redeemButton}
                     buttonColor={colors.primary}
                   >
-                    Redeem ({reward.pointsRequired} pts)
-                  </Button>
+                    Redeem with ({reward.pointsRequired} pts)
+                  </Button> */}
                 </View>
               )}
               ListEmptyComponent={

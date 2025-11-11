@@ -2376,7 +2376,7 @@ export default function AdminDashboard({ navigation }) {
                   mode="outlined"
                 />
                 <TextInput
-                  label="GetPoint ?"
+                  label="Total Points to Get Rewards"
                   value={newReward.price}
                   onChangeText={text => setNewReward({ ...newReward, price: text })}
                   keyboardType="numeric"
@@ -2387,7 +2387,7 @@ export default function AdminDashboard({ navigation }) {
                   mode="outlined"
                 />
                 <TextInput
-                  label="Reedem Point to be"
+                  label="Reedem Point"
                   value={newReward.bundalValue}
                   onChangeText={text => setNewReward({ ...newReward, bundalValue: text })}
                   keyboardType="numeric"
@@ -2430,13 +2430,13 @@ export default function AdminDashboard({ navigation }) {
                     mode="contained"
                     onPress={async () => {
                       const result = await ImagePicker.launchImageLibraryAsync({
+                        mediaTypes: ImagePicker.MediaTypeOptions.Images,
                         base64: true,
-                        // mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                        mediaTypes: [ImagePicker.MediaType.Images], // Instead of .MediaTypeOptions.Images
                         allowsEditing: true,
                         quality: 0.5,
                       });
-                      if (!result.canceled && result.assets?.length) {
+
+                      if (!result.canceled && result.assets?.length > 0) {
                         setNewReward({
                           ...newReward,
                           image: `data:image/jpeg;base64,${result.assets[0].base64}`,
@@ -2449,14 +2449,20 @@ export default function AdminDashboard({ navigation }) {
                   >
                     Upload Image
                   </Button>
+
                   <Button
                     mode="contained"
                     onPress={captureImage}
-                    style={{ flex: 1, marginLeft: 5 }}
+                    style={{
+                      flex: 1,
+                      marginLeft: 5,
+                      borderRadius: 8,
+                      elevation: 2,
+                    }}
                     buttonColor="#4CAF50"
                     textColor="#FFFFFF"
                   >
-                    Capture Photo
+                    📸 Capture Photo
                   </Button>
                 </View>
                 {newReward._id ? (
@@ -2500,7 +2506,7 @@ export default function AdminDashboard({ navigation }) {
               </Card.Content>
             </Card>
 
-            {/* 🔔 Notifications Card (Minor Enhancements) */}
+            {/* Notifications Card (Minor Enhancements) */}
             {/* <Card
               style={[
                 styles.card,
